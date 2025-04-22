@@ -2,6 +2,8 @@
 
 A real-time object detection and scene description system that analyzes video streams or files and provides natural language descriptions of what's being observed.
 
+
+
 ## Features
 
 - Real-time object detection using YOLOv8
