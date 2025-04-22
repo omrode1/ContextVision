@@ -1,14 +1,54 @@
 from ultralytics import YOLO
 import cv2
 import os
+import argparse
 from collections import defaultdict, deque
 from ollama import Client
 
+# Model configuration
+YOLO_MODELS = {
+    "nano": "yolov8n.pt",      # 3.2MB, fastest
+    "small": "yolov8s.pt",     # 11.4MB, balanced
+    "medium": "yolov8m.pt",    # 25.9MB, more accurate
+    "large": "yolov8l.pt",     # 43.7MB, high accuracy
+    "xlarge": "yolov8x.pt"     # 68.2MB, highest accuracy
+}
+
+LLM_MODELS = {
+    "moondream": "moondream",  # 1.7GB, fast specialized vision model
+    "llava13b": "llava:13b",   # 8.0GB, more powerful but slower
+    "llava7b": "llava:7b",     # 4.1GB, less powerful than 13b but faster
+    "bakllava": "bakllava"     # 2.4GB, specialized vision model
+}
+
+# Parse command line arguments
+def parse_args():
+    parser = argparse.ArgumentParser(description='Real-time object detection and scene description')
+    parser.add_argument('--yolo', type=str, default='nano', choices=YOLO_MODELS.keys(),
+                        help='YOLO model size (default: nano)')
+    parser.add_argument('--llm', type=str, default='moondream', choices=LLM_MODELS.keys(),
+                        help='LLM model for descriptions (default: moondream)')
+    parser.add_argument('--video', type=str, default=None,
+                        help='Path to video file (default: None, use camera)')
+    parser.add_argument('--camera', type=int, default=0,
+                        help='Camera index (default: 0)')
+    parser.add_argument('--frame-skip', type=int, default=15,
+                        help='Process every Nth frame (default: 15)')
+    parser.add_argument('--describe-interval', type=int, default=10,
+                        help='Generate description every Nth processed frame (default: 10)')
+    parser.add_argument('--display-scale', type=float, default=0.7,
+                        help='Display window scale (default: 0.7)')
+    parser.add_argument('--min-confidence', type=float, default=0.5,
+                        help='Minimum confidence for detections (default: 0.5)')
+    parser.add_argument('--grid-size', type=int, default=10,
+                        help='Grid size for spatial analysis (default: 10)')
+    return parser.parse_args()
+
 # Load model
-model = YOLO("yolov8n.pt")  # Use the Nano version
-
-
-
+args = parse_args()
+model = YOLO(YOLO_MODELS[args.yolo])  # Load selected YOLO model
+print(f"Using YOLO model: {args.yolo} ({YOLO_MODELS[args.yolo]})")
+print(f"Using LLM model: {args.llm} ({LLM_MODELS[args.llm]})")
 
 def run_detection(image_path, grid_width=10, grid_height=10, min_confidence=0.5):
     # Load image
@@ -83,7 +123,7 @@ def get_position_description(grid_x, grid_y, grid_width, grid_height):
         return f"{vertical} {horizontal}"
 
 
-def describe_image(detections, grid_width, grid_height):
+def describe_image(detections, grid_width, grid_height, llm_model=LLM_MODELS[args.llm]):
     print("Attempting to generate description...")
     client = Client(host='http://localhost:11434')
 
@@ -115,19 +155,19 @@ def describe_image(detections, grid_width, grid_height):
     5. Conclude with an overall impression of the scene's arrangement.
 
     Keep the description professional yet engaging, focusing on the spatial composition. Limit to 2-3 sentences."""
-    print(f"Generated Prompt for Moondream:\n{prompt}")
+    print(f"Generated Prompt for {args.llm}:\n{prompt}")
 
     try:
-        print("Sending request to Moondream...")
+        print(f"Sending request to {args.llm}...")
         response = client.chat(
-            model='moondream', # Switch to the faster model
+            model=llm_model, # Use the selected model
             messages=[{
                 'role': 'user',
                 'content': prompt
             }],
             options={'temperature': 0.5}
         )
-        print(f"Raw response from Moondream: {response}")
+        print(f"Raw response from {args.llm}: {response}")
         description = response['message']['content'].strip()
         print(f"Generated Description: {description}")
         return description
@@ -136,7 +176,7 @@ def describe_image(detections, grid_width, grid_height):
         print(f"Error Type: {type(e).__name__}")
         print(f"Error Details: {str(e)}")
         if "model not found" in str(e).lower():
-            print("Ensure the model 'moondream' is available. Try: ollama pull moondream")
+            print(f"Ensure the model '{llm_model}' is available. Try: ollama pull {llm_model}")
         elif "connection refused" in str(e).lower():
              print("Ensure the Ollama server is running. Try: ollama serve")
         return "Description currently unavailable due to an error."
@@ -192,7 +232,7 @@ def merge_similar_detections(detections, distance_threshold=50):
     return merged
 
 
-def realtime_analysis(camera_index=0, video_path=None, grid_size=10, frame_skip=5, display_scale=0.5, describe_interval=10):
+def realtime_analysis(camera_index=0, video_path=None, grid_size=10, frame_skip=5, display_scale=0.5, describe_interval=10, min_confidence=0.5):
     """
     Performs real-time object detection and description on camera stream or video file.
 
@@ -203,6 +243,7 @@ def realtime_analysis(camera_index=0, video_path=None, grid_size=10, frame_skip=
         frame_skip (int): Process every Nth frame to save computation.
         display_scale (float): Factor to scale the display window size.
         describe_interval (int): Generate description every Nth processed frame.
+        min_confidence (float): Minimum confidence threshold for object detection.
     """
     if video_path:
         print(f"Processing video file: {video_path}")
@@ -244,11 +285,8 @@ def realtime_analysis(camera_index=0, video_path=None, grid_size=10, frame_skip=
             print("Error: Could not write temporary frame.")
             continue
 
-        # Get frame dimensions *once* for potential use in merge/describe if needed
-        # height, width = frame.shape[:2]
-
         # Process frame: Detect -> Merge -> Describe
-        detections = run_detection(temp_frame_path, grid_size, grid_size)
+        detections = run_detection(temp_frame_path, grid_size, grid_size, min_confidence)
         merged_detections = merge_similar_detections(detections)
 
         # --- Generate description only periodically ---
@@ -323,21 +361,38 @@ def realtime_analysis(camera_index=0, video_path=None, grid_size=10, frame_skip=
 
 # Test
 if __name__ == "__main__":
-    # --- Option 1: Realtime camera analysis ---
-    # print("Starting real-time camera analysis...")
-    # realtime_analysis(camera_index=0, frame_skip=10, display_scale=0.6)
-
-    # --- Option 2: Video file analysis ---
-    video_file_path = "/home/quantic/learning/What-m-i-seeing/glove_test.mp4" # <--- CHANGE THIS TO YOUR VIDEO FILE PATH
-    if os.path.exists(video_file_path):
-         print(f"Starting analysis for video file: {video_file_path}")
-         # Using smaller describe_interval for testing moondream
-         realtime_analysis(video_path=video_file_path, frame_skip=15, display_scale=0.7, describe_interval=5)
+    # Use command line arguments
+    if args.video and os.path.exists(args.video):
+        print(f"Starting analysis for video file: {args.video}")
+        realtime_analysis(
+            video_path=args.video,
+            frame_skip=args.frame_skip,
+            display_scale=args.display_scale,
+            describe_interval=args.describe_interval,
+            grid_size=args.grid_size,
+            min_confidence=args.min_confidence
+        )
+    elif args.video:
+        print(f"Video file not found: {args.video}. Check the path.")
+        print("Falling back to camera analysis...")
+        realtime_analysis(
+            camera_index=args.camera,
+            frame_skip=args.frame_skip,
+            display_scale=args.display_scale,
+            describe_interval=args.describe_interval,
+            grid_size=args.grid_size,
+            min_confidence=args.min_confidence
+        )
     else:
-         print(f"Video file not found: {video_file_path}. Check the path.")
-         # Fallback or default behavior if video not found?
-         # print("Falling back to camera analysis...")
-         # realtime_analysis(camera_index=0, frame_skip=10, display_scale=0.6)
+        print(f"Starting real-time camera analysis from camera index: {args.camera}")
+        realtime_analysis(
+            camera_index=args.camera,
+            frame_skip=args.frame_skip,
+            display_scale=args.display_scale,
+            describe_interval=args.describe_interval,
+            grid_size=args.grid_size,
+            min_confidence=args.min_confidence
+        )
 
 
     # --- Option 3: Single image analysis (comment out other options) ---

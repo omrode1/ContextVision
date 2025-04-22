@@ -12,6 +12,7 @@ A real-time object detection and scene description system that analyzes video st
 - Support for both camera feeds and video files
 - Merging of similar nearby detections
 - Adjustable processing parameters for performance tuning
+- Multiple model support (YOLOv8 variants and different LLMs)
 
 ## Requirements
 
@@ -41,25 +42,73 @@ curl -fsSL https://ollama.com/install.sh | sh
 
 4. Download required models:
 ```bash
-# YOLOv8 nano model will be downloaded automatically
-# Download Moondream model
+# YOLOv8 models will be downloaded automatically
+# Download the default LLM model (moondream)
 ollama pull moondream
+
+# For other LLM options:
+ollama pull llava:13b    # More powerful but slower
+ollama pull llava:7b     # Balance of speed and quality
+ollama pull bakllava     # Alternative vision model
 ```
 
 ## Usage
 
 ### Basic Usage
 
-Run with video file:
+Run with default settings (uses camera input):
 ```bash
 python scripts/detect_objects.py
 ```
-Note: Edit the `video_file_path` variable in the script to point to your video file.
 
-Run with camera:
+Run with a video file:
 ```bash
-# Uncomment option 1 in the main block and comment out option 2
-python scripts/detect_objects.py
+python scripts/detect_objects.py --video path/to/your/video.mp4
+```
+
+### Command Line Options
+
+The script supports various command-line arguments:
+
+```bash
+python scripts/detect_objects.py --help
+```
+
+Key options:
+```
+--yolo {nano,small,medium,large,xlarge}
+                      YOLO model size (default: nano)
+--llm {moondream,llava13b,llava7b,bakllava}
+                      LLM model for descriptions (default: moondream)
+--video VIDEO         Path to video file (default: None, use camera)
+--camera CAMERA       Camera index (default: 0)
+--frame-skip FRAME_SKIP
+                      Process every Nth frame (default: 15)
+--describe-interval DESCRIBE_INTERVAL
+                      Generate description every Nth processed frame (default: 10)
+--display-scale DISPLAY_SCALE
+                      Display window scale (default: 0.7)
+--min-confidence MIN_CONFIDENCE
+                      Minimum confidence for detections (default: 0.5)
+--grid-size GRID_SIZE
+                      Grid size for spatial analysis (default: 10)
+```
+
+### Examples
+
+Use a more powerful YOLO model with default settings:
+```bash
+python scripts/detect_objects.py --yolo medium
+```
+
+Process a video with higher quality but slower LLM model:
+```bash
+python scripts/detect_objects.py --video myvideo.mp4 --llm llava13b
+```
+
+Optimize for performance with faster processing and less frequent descriptions:
+```bash
+python scripts/detect_objects.py --frame-skip 30 --describe-interval 20
 ```
 
 ### Controls
@@ -67,17 +116,23 @@ python scripts/detect_objects.py
 - Press `q` to quit
 - Press `p` to pause/resume (when processing video files)
 
-### Configuration
+## Model Comparison
 
-Edit these parameters in the script to adjust performance:
+### YOLO Models
+- `nano`: 3.2MB, fastest inference but less accurate
+- `small`: 11.4MB, balanced speed and accuracy
+- `medium`: 25.9MB, more accurate but slower
+- `large`: 43.7MB, high accuracy, slower
+- `xlarge`: 68.2MB, highest accuracy, slowest
 
-- `frame_skip`: Process every Nth frame
-- `describe_interval`: Generate description every Nth processed frame
-- `grid_size`: Defines the resolution of spatial grid
-- `display_scale`: Adjusts the display window size
+### LLM Models
+- `moondream`: 1.7GB, fast specialized vision model
+- `llava7b`: 4.1GB, balanced model
+- `bakllava`: 2.4GB, specialized vision model
+- `llava13b`: 8.0GB, most powerful but slowest
 
 ## Customization
 
-- Change YOLO model by editing: `model = YOLO("yolov8n.pt")`
-- Use different LLM models: Change `model='moondream'` to any other Ollama model
+- Add new YOLO models by extending the `YOLO_MODELS` dictionary
+- Add new LLM models by extending the `LLM_MODELS` dictionary
 - Adjust prompt by modifying the `prompt` variable in `describe_image()` 
