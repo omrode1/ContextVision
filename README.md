@@ -1,4 +1,4 @@
-# What-m-i-seeing
+# ContextVision
 
 A real-time object detection and scene description system that analyzes video streams or files and provides natural language descriptions of what's being observed.
 
